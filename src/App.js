@@ -5,28 +5,32 @@ const builtinIcons = [ "default", "play",  "stop",  "question",  "redx",  "music
 const defaultTitle = document.title;
 const defaultIcon = builtinIcons[0];
 
-function getIcon (icon) {
+function getIcon (savedIcons, icon) {
+  if (icon in savedIcons) return savedIcons[icon];
   return require("./icons/" + icon + ".png");
 }
 
 function App() {
   const [ title, setTitle ] = React.useState(() => {
     const query = getHashQuery();
-    return query && query.get("title") || defaultTitle;
+    return (query && query.get("title")) || defaultTitle;
   });
   const [ icon, setIcon ] = React.useState(() => {
     const query = getHashQuery();
-    return query && query.get("icon") || defaultIcon;
+    return (query && query.get("icon")) || defaultIcon;
   });
   const setShortcutIcon = useShortcutIcon();
+  const [ adding, setAdding ] = React.useState(false);
+  const [ addIconValue, setAddIconValue ] = React.useState("");
+  const [ savedIcons, setSavedIcons ] = useSavedState("dodgy-tabs-icons", {});
 
   React.useEffect(() => {
     document.title = title;
   }, [ title ]);
 
   React.useEffect(() => {
-    setShortcutIcon(getIcon(icon));
-  }, [ icon ]);
+    setShortcutIcon(getIcon(savedIcons, icon));
+  }, [ savedIcons, setShortcutIcon, icon ]);
 
   useDebouncedEffect(() => {
     const params = new URLSearchParams();
@@ -43,14 +47,37 @@ function App() {
     icon && setIcon(icon);
   });
 
+  React.useEffect(() => {
+    const callback = e => {
+      if (!(e.target instanceof HTMLInputElement) && e.key === "Delete") {
+        setIcon(defaultIcon);
+        const newObj = { ...savedIcons };
+        delete newObj[icon];
+        setSavedIcons(newObj);
+      }
+    };
+    document.addEventListener("keyup", callback);
+
+    return () => document.removeEventListener("keyup", callback);
+  }, [ savedIcons, setSavedIcons, setIcon, icon ]);
+
+  function addIcon (url) {
+    setAdding(false);
+    setAddIconValue("");
+    const id = Math.floor(Math.random() * 1e6).toString(36);
+    setSavedIcons({ ...savedIcons, [id]: url });
+  }
+
+  const icons = [ ...builtinIcons, ...Object.keys(savedIcons) ];
+
   return (
     <div className="App">
       <header className="App-header">
-        <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Title" />
+        <input className="tab-title" value={title} onChange={e => setTitle(e.target.value)} placeholder="Title" />
         <ul className="icon-picker">
           {
-            builtinIcons.map(key => {
-              const url = getIcon(key);
+            icons.map(key => {
+              const url = getIcon(savedIcons, key);
               return (
                 <li key={key} className={`${key === icon ? "selected" : ""}`} onClick={() => setIcon(key)}>
                   <img src={url} />
@@ -59,6 +86,15 @@ function App() {
             })
           }
         </ul>
+        {
+          adding ?
+            <form className="new-icon-form" onSubmit={e => { e.preventDefault(); addIcon(addIconValue); }}>
+              <input value={addIconValue} onChange={e => setAddIconValue(e.target.value)} placeholder="https://" autoFocus />
+              <button>Add</button>
+            </form>
+            :
+            <button className="add-button" onClick={() => setAdding(true)}>New Icon</button>
+        }
       </header>
     </div>
   );
@@ -123,4 +159,37 @@ function useHashListener (fn) {
 
     return () => window.removeEventListener("hashchange", callback);
   }, []);
+}
+
+/**
+ * @param {string} key
+ * @param {any} initialState
+ */
+function useSavedState (key, initialState) {
+  function loadSavedState () {
+    const saved = localStorage.getItem(key);
+    if (!saved) return initialState;
+    try {
+      return JSON.parse(saved);
+    } catch (_) {
+      return initialState;
+    }
+  }
+
+  const [ state, setState ] = React.useState(loadSavedState);
+
+  React.useEffect(() => {
+    const listener = () => setState(loadSavedState());
+    window.addEventListener("storage", listener);
+
+    return () => window.removeEventListener("storage", listener);
+  }, []);
+
+  return [
+    state,
+    newState => {
+      localStorage.setItem(key, JSON.stringify(newState));
+      setState(newState);
+    }
+  ];
 }
